@@ -1,1 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authorized Access Portal</title>
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --danger: #ef4444;
+            --text: #1f2937;
+            --bg: #f3f4f6;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .card {
+            background: white;
+            padding: 2.5rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            width: 100%;
+            max-width: 450px;
+            text-align: center;
+            box-sizing: border-box;
+        }
+        h1 { margin-top: 0; color: #111827; font-size: 1.75rem; }
+        p { color: #6b7280; font-size: 0.95rem; line-height: 1.5; }
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            font-weight: 500;
+            border-radius: 6px;
+            cursor: pointer;
+            width: 100%;
+            transition: background-color 0.2s;
+        }
+        button:hover { background-color: #4338ca; }
+        .logout-btn {
+            background-color: #9ca3af;
+            margin-top: 1.5rem;
+        }
+        .logout-btn:hover { background-color: #4b5563; }
+        .hidden { display: none !important; }
+        .error { color: var(--danger); font-weight: 500; margin: 1rem 0; }
+        
+        /* Admin Dashboard Styles */
+        .admin-form {
+            display: flex;
+            gap: 0.5rem;
+            margin: 1.5rem 0;
+        }
+        input[type="email"] {
+            flex: 1;
+            padding: 0.75rem;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+        .user-list {
+            text-align: left;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 0.5rem;
+            margin-top: 1rem;
+        }
+        .user-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        .user-item:last-child { border-bottom: none; }
+        .delete-btn {
+            background: var(--danger);
+            width: auto;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.85rem;
+        }
+        .delete-btn:hover { background-color: #b91c1c; }
+    </style>
+</head>
+<body>
+
+    <!-- SCREEN 1: LOGIN -->
+    <div id="login-view" class="card">
+        <h1>Welcome</h1>
+        <p>Please sign in with your Google account to access the portal.</p>
+        <button id="login-btn">Sign in with Google</button>
+        <p id="login-error" class="error hidden"></p>
+    </div>
+
+    <!-- SCREEN 2: PENDING APPROVAL / DENIED -->
+    <div id="denied-view" class="card hidden">
+        <h1 style="color: var(--danger);">Access Denied</h1>
+        <p>Your Google account is not on the approved users list. Please contact the administrator to request access.</p>
+        <p id="user-email-display" style="font-weight: bold; color: #111827;"></p>
+        <button id="denied-logout-btn" class="logout-btn">Sign Out</button>
+    </div>
+
+    <!-- SCREEN 3: STANDARD USER MAIN PAGE -->
+    <div id="main-view" class="card hidden">
+        <h1>Main Dashboard</h1>
+        <p>Welcome to the secure portal! You have been successfully approved by the administrator.</p>
+        <button id="main-logout-btn" class="logout-btn">Sign Out</button>
+    </div>
+
+    <!-- SCREEN 4: ADMIN PAGE -->
+    <div id="admin-view" class="card hidden">
+        <h1>Admin Control Panel</h1>
+        <p>Logged in as: <strong>bajajhamish@gmail.com</strong></p>
+        
+        <div class="admin-form">
+            <input type="email" id="new-user-email" placeholder="user@gmail.com" required>
+            <button id="add-user-btn" style="width: auto;">Add User</button>
+        </div>
+        
+        <p style="text-align: left; font-weight: bold; margin-bottom: 0.5rem;">Approved Users:</p>
+        <div id="user-list-container" class="user-list">
+            <!-- Dynamically populated -->
+        </div>
+
+        <button id="admin-logout-btn" class="logout-btn">Sign Out</button>
+    </div>
+
+    <!-- FIREBASE SERVICES SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://gstatic.com";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://gstatic.com";
+        import { getDatabase, ref, set, remove, onValue } from "https://gstatic.com";
+
+        // 1. YOUR FIREBASE CONFIGURATION
+        // Replace the object config below with your actual Firebase project web app configuration
+        const firebaseConfig = {
+            apiKey: "YOUR_API_KEY",
+            authDomain: "YOUR_AUTH_DOMAIN",
+            databaseURL: "YOUR_DATABASE_URL",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_STORAGE_BUCKET",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getDatabase(app);
+        const provider = new GoogleAuthProvider();
+
+        const ADMIN_EMAIL = "bajajhamish@gmail.com";
+
+        // DOM Elements
+        const views = {
+            login: document.getElementById('login-view'),
+            denied: document.getElementById('denied-view'),
+            main: document.getElementById('main-view'),
+            admin: document.getElementById('admin-view')
+        };
+        
+        const loginBtn = document.getElementById('login-btn');
+        const loginError = document.getElementById('login-error');
+        const userEmailDisplay = document.getElementById('user-email-display');
+        const newUserEmailInput = document.getElementById('new-user-email');
+        const addUserBtn = document.getElementById('add-user-btn');
+        const userListContainer = document.getElementById('user-list-container');
+
+        // Helper function to switch views cleanly
+        function showView(viewKey) {
+            Object.keys(views).forEach(key => {
+                if (key === viewKey) {
+                    views[key].classList.remove('hidden');
+                } else {
+                    views[key].classList.add('hidden');
+                }
+            });
+        }
+
+        // Helper to sanitize emails for Firebase keys (Firebase paths cannot contain dots '.')
+        function sanitizeEmail(email) {
+            return email.toLowerCase().replace(/\./g, ',');
+        }
+
+        // 2. AUTHENTICATION STATE OBSERVER
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                const userEmail = user.email;
+
+                // Condition A: If the user is the super-admin
+                if (userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+                    showView('admin');
+                    loadApprovedUsersList();
+                } else {
+                    // Condition B: Check Realtime Database to see if the user is approved
+                    const sanitized = sanitizeEmail(userEmail);
+                    const userRef = ref(db, 'approved_users/' + sanitized);
+                    
+                    onValue(userRef, (snapshot) => {
+                        if (snapshot.exists() && snapshot.val().approved === true) {
+                            showView('main');
+                        } else {
+                            userEmailDisplay.textContent = userEmail;
+                            showView('denied');
+                        }
+                    }, { onlyOnce: true });
+                }
+            } else {
+                // No user signed in
+                showView('login');
+            }
+        });
+
+        // 3. SIGN IN / SIGN OUT ACTIONS
+        loginBtn.addEventListener('click', () => {
+            loginError.classList.add('hidden');
+            signInWithPopup(auth, provider)
+                .catch((error) => {
+                    loginError.textContent = error.message;
+                    loginError.classList.remove('hidden');
+                });
+        });
+
+        const logoutAction = () => {
+            signOut(auth).catch((error) => console.error("Sign out error", error));
+        };
+
+        document.getElementById('main-logout-btn').addEventListener('click', logoutAction);
+        document.getElementById('admin-logout-btn').addEventListener('click', logoutAction);
+        document.getElementById('denied-logout-btn').addEventListener('click', logoutAction);
+
+        // 4. ADMIN FEATURES (Managing approved users in Realtime Database)
+        function loadApprovedUsersList() {
+            const approvedUsersRef = ref(db, 'approved_users');
+            onValue(approvedUsersRef, (snapshot) => {
+                userListContainer.innerHTML = '';
+                const data = snapshot.val();
+                
+                if (data) {
+                    Object.keys(data).forEach(sanitizedKey => {
+                        const userObj = data[sanitizedKey];
+                        
+                        const item = document.createElement('div');
+                        item.className = 'user-item';
+                        item.innerHTML = `${userObj.email}Remove`;
+                      userListContainer.appendChild(item);
+                    });
+                  // Add click listeners to newly created remove buttons
+                  document.querySelectorAll('.delete-btn').forEach(btn => {btn.addEventListener('click', (e) => {const keyToRemove = e.target.getAttribute('data-key');remove(ref(db, 'approved_users/' + keyToRemove));});});} else {userListContainer.innerHTML = 'No approved users yet.';}});}addUserBtn.addEventListener('click', () => {const emailToAdd = newUserEmailInput.value.trim().toLowerCase();if (!emailToAdd) return;const sanitized = sanitizeEmail(emailToAdd);set(ref(db, 'approved_users/' + sanitized), {email: emailToAdd,approved: true}).then(() => {newUserEmailInput.value = '';}).catch(err => {alert("Error adding user: Ensure your Firebase database rules permit this authenticated write.");console.error(err);});});
 
